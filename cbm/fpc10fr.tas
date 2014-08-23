@@ -1,0 +1,637 @@
+
+
+;fpc10fr.asm ;FastPCFR.prg
+;Receives a file via FastPC-BD cable
+;1-3.11.1998
+;2.2.98
+;27.5.99 - back to line version, minor
+;          bug in convascii removed
+;
+;Maciej 'YTM/Alliance' Witkowiak
+;FastSave by Explorer
+;
+
+false    = 0
+true     = 1
+
+use2mhz  = true
+inline   = true
+
+name     = $0334
+buffer   = $0d00
+
+dd00     = $02
+storx    = $03
+story    = $04
+
+mb       = $fa
+sb       = $fb
+ll       = $fc
+lh       = $fd
+lgl      = $fe
+lgh      = $ff
+
+print    .macro
+         lda #<\1
+         ldy #>\1
+         jsr $ab1e
+         .endm
+
+         *= $0801
+
+         .word $080b,1999
+         .byte $9e
+         .text "2061"
+         .byte 0,0,0
+
+start    lda #0
+         sta $d020
+         sta $d021
+         sta $d015
+         lda #$17
+         sta $d018
+         #print statxt
+
+         jsr wait4start
+
+         lda #0
+         jsr pcsend
+         lda #%11000000
+         jsr pcsend
+
+         jsr pcrinit
+         ldx #0
+namelp   jsr pcget
+         jsr convascii
+         sta name,x
+         inx
+         cpx #8+3+1
+         bne namelp
+
+         jsr pcget
+         sta lgl
+         jsr pcget
+         sta lgh
+
+         lda lgl
+         ora lgh
+         bne ok1
+         jmp endthis
+
+ok1      lda #<buffer
+         ldx #>buffer
+         sta mb
+         stx sb
+         ldy #0
+         sty ll
+         sty lh
+
+         sei
+         ldx #0
+         stx $d011
+         stx $d020
+         .if use2mhz
+         inx
+         stx $d030
+         .endif
+
+mainlp   ldx #$35
+         stx $01
+         jsr pcget
+         ldx #$30
+         stx $01
+         sta (mb),y
+         inc ll
+         bne *+4
+         inc lh
+         inc mb
+         bne *+4
+         inc sb
+         lda lh
+         cmp lgh
+         bne mainlp
+         lda ll
+         cmp lgl
+         bne mainlp
+
+         lda #$37
+         sta $01
+         .if use2mhz
+         lda #0
+         sta $d030
+         .endif
+         lda #$1b
+         sta $d011
+         cli
+
+sv{CBM-@}main  #print savtxt
+
+         ldx #0
+nmlp     lda name,x
+         jsr $ffd2
+         inx
+         cpx #8+3+1
+         bne nmlp
+         lda #13
+         jsr $ffd2
+
+         lda #<buffer+2   ;end addy
+         clc
+         adc lgl
+         sta $ae
+         lda #>buffer+2
+         adc lgh
+         sta $af
+
+         lda #8+3+1
+         ldx #<name
+         ldy #>name
+         jsr $ffbd      ;set param.
+
+         lda #<buffer+2   ;start addy
+         ldx #>buffer+2
+         sta $ac
+         stx $ad
+
+         lda buffer       ;load addy
+         ldx buffer+1
+         sta $fe
+         stx $ff
+
+         jsr save       ;SAVE
+         bcs filexist   ;errors
+         bcc endthis
+
+filexist inc $d020
+         #print errtxt
+         ldy #120
+         ldx #$ff
+fe       dex
+         bne *-1
+         dey
+         bne fe
+         dec $d020
+         jsr $ffe4
+         beq *-3
+         cmp #"y"
+         beq sv{CBM-@}main
+
+endthis  #print endtxt
+
+         jsr $ffe4
+         beq *-3
+         cmp #" "
+         bne finito
+         jmp start
+finito   rts
+
+convascii
+         cmp #$60
+         bmi caok
+         cmp #$7b
+         bpl caok
+         and #$df
+caok     rts
+
+;---------------------------------------
+wait4start
+         jsr pcsinit
+         lda dd00
+         sta $dd00
+         lda #$0f
+         sta $dd01
+         .ifeq inline
+         jsr flag2
+         lda $dd00
+         ora #4
+         sta $dd00
+         jsr flag2
+         .endif
+         .ifne inline
+         lda $dd0d
+         and #$10
+         beq *-5
+         lda $dd00
+         ora #4
+         sta $dd00
+         lda $dd0d
+         and #$10
+         beq *-5
+         .endif
+         rts
+
+         .ifeq inline
+flag2    lda $dd0d
+         and #$10
+         beq flag2
+         rts
+         .endif
+
+pcrinit  lda #$00
+         beq pcinit
+pcsinit  lda #$ff
+pcinit   sta $dd03
+         ldy #0
+         sty $dd01
+         lda $dd02
+         ora #4
+         sta $dd02
+         lda #$10
+         sta $dd0d
+         lda $dd00
+         and #$fb
+         sta dd00
+         rts
+
+pcget    stx storx
+         sty story
+         lda dd00
+         tax
+         ora #4
+         tay
+         stx $dd00
+         .ifeq inline
+         jsr flag2
+         ldx $dd01
+         sty $dd00
+         jsr flag2
+         .endif
+         .ifne inline
+         lda $dd0d
+         and #$10
+         beq *-5
+         ldx $dd01
+         sty $dd00
+         lda $dd0d
+         and #$10
+         beq *-5
+         .endif
+         txa
+         ldy story
+         ldx storx
+         rts
+
+pcsend   sta $dd01
+         stx storx
+         sty story
+         lda dd00
+         tax
+         ora #4
+         tay
+         stx $dd00
+         .ifeq inline
+         jsr flag2
+         sty $dd00
+         jsr flag2
+         .endif
+         .ifne inline
+         lda $dd0d
+         and #$10
+         beq *-5
+         sty $dd00
+         lda $dd0d
+         and #$10
+         beq *-5
+         .endif
+         ldy story
+         ldx storx
+         rts
+;---------------------------------------
+statxt   .byte 147,155
+         .text "FastPC File Receiver"
+         .byte 13
+         .text "by Maciej 'YTM' Witkowi"
+         .text "ak"
+         .byte 13
+         .text "FastSave by Explorer"
+         .byte 13,13,5
+         .text "Insert a disk and selec"
+         .text "t a file"
+         .byte 13
+         .text "on your PC."
+         .byte 13,0
+
+savtxt   .byte 13,13,155
+         .null "Now saving:"
+
+errtxt   .byte 13,13,5
+         .text "Error happened..."
+         .byte 13
+         .text "Try again? (y/n)"
+         .byte 13,0
+
+endtxt   .byte 147,155,13,13
+         .text "Press "
+         .byte 5
+         .text " SPACE "
+         .byte 155
+         .text "for next transfer, or"
+         .byte 13
+         .text "anything else to exit"
+         .byte ".",0
+
+;---------------------------------------
+;FAST{CBM-@}SAVE{CBM-@}AGAIN        /17.10.95/$023F/
+;(W)1995 by Adam'EXPLORER'Kazmierski/AGY
+;{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}
+;---------------------------------------
+
+save     lda #$61
+         sta $b9
+         jsr $f3d5
+         lda $ba
+         jsr $ed09
+         lda #$6f
+         jsr $edc7
+         jsr $ee13
+         pha
+         jsr $edfe
+test     pla
+         cmp #$30
+         beq init
+         rts
+
+init     lda #<buff     ;INSTALL PROC.
+         ldx #>buff
+         sta loop1+1
+         stx loop1+2
+         lda #5
+         ldx #0
+         sta from
+         stx from+1
+         stx $fc
+go       jsr on1
+         ldx #6
+         lda com1-1,x
+         jsr $eddd
+         dex
+         bne *-7
+loop1    lda buff,x
+         jsr $eddd
+         inx
+         cpx #$20
+         bne *-9
+         jsr $edfe
+         lda loop1+1
+         clc
+         adc #$20
+         sta loop1+1
+         bcc *+5
+         inc loop1+2
+         lda from+1
+         clc
+         adc #$20
+         sta from+1
+         bne go
+
+         jsr on1
+         ldx #5
+         lda com2-1,x
+         jsr $eddd
+         dex
+         bne *-7
+         jsr $edfe
+         sei
+         bit $dd00
+         bmi *-3
+
+         jsr proc1{CBM-@}
+         lda $fe        ;#<
+         jsr lp1
+         dec $fd
+         lda $ff        ;#>
+         jsr lp1
+         bne lp2
+lp4      jsr proc1
+lp3      ldy #0
+         inc $01        ;(!)ROM
+         lda ($ac),y
+         dec $01        ;(!)ROM
+         jsr lp1
+         inc $ac
+         bne lp2
+         inc $ad
+lp2      dec $fd
+         bne lp3
+         lda $fc
+         beq lp4
+         cli
+         bit $dd00
+         bmi error
+         clc
+         rts
+error    sec
+         rts
+;{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}
+proc1{CBM-@}   sec
+         lda $ae
+         sbc $ac
+         sta $fd
+         tax
+         lda $af
+         sbc $ad
+         bne lp5
+         cpx #$ff
+         beq lp5
+         inx
+         inx
+         inx
+         txa
+         inc $fd
+         inc $fd
+         dec $fc
+         bne lp1
+proc1    sec
+         lda $ae
+         sbc $ac
+         sta $fd
+         tax
+         lda $af
+         sbc $ad
+         bne lp5
+         cpx #$ff
+         beq lp5
+         inx
+         txa
+         dec $fc
+         bne lp1
+lp5      lda #$fe
+         sta $fd
+         lda #0
+lp1      pha
+         bit $dd00
+         bpl *-3
+         lsr a
+         lsr a
+         lsr a
+         lsr a
+         tax
+         sec
+lb2      lda $d012
+         sbc #$32
+         bcc lb1
+         and #7
+         beq lb2
+lb1      lda #$10
+         eor $dd00
+         sta $dd00
+         lda tabv,x
+         sta $dd00
+         lsr a
+         lsr a
+         and #$f7
+         sta $dd00
+         pla
+         and #$0f
+         tax
+         lda tabv,x
+         sta $dd00
+         lsr a
+         lsr a
+         and #$f7
+         sta $dd00
+         nop
+         nop
+         lda #7
+         sta $dd00
+         rts
+;{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}
+tabv     .word $8707
+         .word $a727
+         .word $c747
+         .word $e767
+         .word $9717
+         .word $b737
+         .word $d757
+         .word $f777
+;{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}
+on1      lda $ba        ;device number
+         jsr $ed0c
+         lda #$6f
+         jmp $edb9
+
+com1     .byte $20
+from     .word $05
+         .text "w-m"
+com2     .word $5d05
+         .text "e-m"
+;{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}
+buff     = *
+         *= $0500
+         .offs buff-*
+
+         lda $14
+         tax
+         lsr a
+         adc #3
+         sta $31
+         txa
+         adc #6
+         sta $32
+lop5     jsr takeb
+         beq lop1
+         sta $81
+         tax
+         inx
+         stx $1f
+         lda #0
+         sta $80
+         beq lop2
+lop1     lda $02fa
+         ora $02fc
+         bne lop3
+         lda #$72
+         jmp $f969
+;{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}
+lop3     jsr $f11e
+lop2     lda $80
+         sta ($30),y
+         iny
+         lda $81
+         sta ($30),y
+         ldy #2
+lop4     jsr takeb
+         sta ($30),y
+         iny
+         cpy $1f
+         bne lop4
+         jsr $0150
+         inc $b6
+         bne norm
+         inc $bc
+norm     ldx $14
+         lda $81
+         sta $07,x
+         lda $80
+         cmp $0a
+         beq lop5
+         sta $06,x
+         jmp $f418
+;{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}
+prggo    lda #$c8
+         ldx #8         ;INTERLEAVE
+         ldy #$10       ;SPEED HEAD
+         sta $64
+         stx $69
+         sty $1c07
+         ldx #$64
+lop8     lda $f574,x
+         sta $014f,x
+         dex
+         bne lop8
+         stx $1f
+         lda #$60
+         sta $01b4
+         inx
+         lda #$40
+         sta $02f9
+         stx $82
+         stx $83
+         jsr $df93
+         sta $15
+         asl a
+         sta $14
+         tax
+         jsr io
+lop11    lda $06,x
+         beq close
+         sta $0a
+         lda #$e0
+         sta $02
+         lda $02
+         bmi *-2
+         cmp #2
+         bcc lop11
+         cmp #$72
+         bne error{CBM-@}
+         jmp $e645
+error{CBM-@}   jmp $d63f
+close    jmp $db23
+;{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}{SHIFT-*}
+takeb    lda #1
+         sta $1800
+         lda #$ff
+lop6     bit $1800
+         beq lop6
+         .word $ea3a
+         lda $1800
+         asl a
+         .word $ea08
+         ora $1800
+         asl a
+         asl a
+         asl a
+         asl a
+         sta $85
+         lda $1800
+         asl a
+         plp
+         ora $1800
+         and #$0f
+         ora $85
+io       pha
+         lda #2
+         sta $1800
+         .word $6068
+
+
